@@ -61,10 +61,6 @@ There are a few things to note before we start. When using AppCompat, VectorDraw
 
 Right, so you want to use a vector asset in your app and your minSdkVersion is < 21. Great! First check the asset works on a API 21+ device, just as a sanity check.
 
-### OK, so how do I use it?
-
-There are two ways to use vector resources in AppCompat which work back to API 7+:
-
 ### AppCompatImageView
 
 So you probably know that AppCompat 'injects' its own widgets in place of many framework widgets. This allows it to perform tinting and other backporty things. We've added support for VectorDrawableCompat here too with the new `app:srcCompat` attribute. You can safely use srcCompat for non-vector assets too.
@@ -105,61 +101,6 @@ iv.setImageResource(R.drawable.ic_search);
 
 The same attribute and calls work for ImageButton too.
 
-### The 'magic' way
-
-> Disclaimer: this may or may not work for you. AppCompat uses this extensively internally, but it relies on the just the right environment to actually work.
-
-AppCompat can intercept _some_ drawable inflation from the framework. What this enables is you can use all of the standard attributes for a vector asset and everything may just work.
-
-So let me tell you what may work:
-
-DrawableContainers which reference other drawables resources which contain only a vector resource. For example, a StateListDrawable which references other files which contain a vector.
-
-**res/drawable/state_list_icon.xml**
-
-{% highlight xml %}
-<selector xmlns:android="...">
-    <item android:state_checked="true" android:drawable="@drawable/checked_icon" />
-    <item android:drawable="@drawable/icon" />
-</selector>
-{% endhighlight %}
-
-**res/drawable/checked_icon.xml**
-
-{% highlight xml %}
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="32dp"
-    android:viewportWidth="32"
-    android:height="32dp"
-    android:viewportHeight="32">
-    
-    ...
-    
-</vector>
-{% endhighlight %}
-
-You can then use the state list drawable in most places:
-
-As a TextView's compound drawable:
-
-{% highlight xml %}
-<TextView android:drawableLeft="@drawable/state_list_icon">
-{% endhighlight %}
-
-As a RadioButton's button:
-
-{% highlight xml %}
-<RadioButton android:button="@drawable/state_list_icon">
-{% endhighlight %}
-
-As an ImageView's src:
-
-{% highlight xml %}
-<ImageView android:src="@drawable/state_list_icon">
-{% endhighlight %}
-
-You don't have to use StateListDrawable. It also works with InsetDrawable, LayerDrawable, LevelListDrawable and RotateDrawable containers. The only rule is that the vector needs to be in a separate file.
-
 ## What about Animated Vectors?
 
 So far we've only talked about 'static' vector drawables. So let's talk about animated vectors. They work too in much the same way, but they're only available on API v11+. If you try to load an `<animated-vector>` on devices running API 10 or below then the system will return `null` and nothing will be displayed.
@@ -171,55 +112,6 @@ There are also some limitations to what kind of things animated vectors can do w
 * Move along path. This is rarely used. The geometry object can move around, along an arbitrary path.
 
 In summary, the Animator declaration has to be valid and functional based on the platform your app will be running on.
-
-## How does the 'magic way' even work?
-
-You can skip this bit if you're not interested in how this is implemented, or have a weak stomach. 😷
-
-There is no way currently within the Android platform to use custom drawable implementations from resources. So the following does not work:
-
-**res/drawable/my_awesome_drawable.xml**
-
-{% highlight xml %}
-<my.package.superawesomedrawable xmlns:app="..."
-    app:customAttr1="32dp"
-    app:customAttr2="32dp">
-    
-    ...
-    
-</my.package.superawesomedrawable>
-{% endhighlight %}
-
-To re-iterate: the previous code **DOES NOT** work currently.
-
-So you might be asking how we got custom drawables to work in AppCompat? Well there's a little known hack in the Android drawable system on API 19 and below which has been kept safe for a rainy day.
-
-First though, a little background _(I should really do a talk on this, note to self)_. When you set attributes on a resource, that manifests itself as a [TypedArray][1] instance to the implementing View, Drawable, etc, via a call to obtainStyledAttributes(). That call chain is safely locked up, there's no way to hook into it (believe me, I've tried). TypedArray is final so we can't extend from it.
-
-The hack I mentioned earlier (actually a bug fixed in API 21) is the fact that certain DrawableContainer implementations grab their child drawables from a call to Resources.getDrawable() instead of directly from the TypedArray.
-
-So for example, here an excerpt from [InsetDrawable][2] in kitkat-release:
-
-{% highlight java %}
-Resources r = ...;
-    
-int drawableRes = a.getResourceId(android.R.styleable.InsetDrawable_drawable, 0);
-    
-if (drawableRes != 0) {  
-   dr = r.getDrawable(drawableRes);  
-}
-{% endhighlight %}
-
-Fortunately, Resources **is** something that we can hook it, but it's a bit clumsy to actually implement.
-
-First we had to create a Resources wrapper which overrides the getDrawable() call. For the purpose of this blog post we'll call it ResourcesWrapper. Its getDrawable() first checks AppCompat's own internal drawable manager for any custom drawable handling. If AppCompat doesn't want to handle it, it just lets the framework handle it.
-
-So we have the Resources wrapper, but we now need a way for Views to use it. We do this via a ContextWrapper which returns one of our ResourcesWrapper instances from getResources(). Then we need to make all of the Views use our new Context. We do that via two ways:
-
-1. Every AppCompat widget (AppCompatImageView, etc) wraps it's provided Context in the constructor.
-2. AppCompat's internal view inflater provides one of these ContextWrappers to every inflated view.
-
-Fun right? As I said, this is all implementation detail so don't worry if you don't understand it. I know that some of you like to know this kind of stuff though.
 
 ---
 
